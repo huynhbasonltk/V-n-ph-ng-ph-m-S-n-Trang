@@ -6,6 +6,9 @@ const INITIAL_PRODUCTS: Product[] = [];
 const INITIAL_CUSTOMERS: Customer[] = [];
 const INITIAL_ORDERS: Order[] = [];
 
+// URL Mặc định
+const DEFAULT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzQ2vsSHCTvF1WF6j8DSRl_U0wAV8MUmArJs5TikhNoQAkFtkzHwimlG-F1tz7QZbj6_g/exec";
+
 export const calculateDailyStats = (orders: Order[]): DailyStat[] => {
   const stats: DailyStat[] = [];
   const today = new Date();
@@ -78,7 +81,24 @@ const apiCall = async (url: string, action: string, sheet: string, data?: any) =
 export const DataService = {
   getSettings: async (): Promise<AppSettings> => {
     const stored = localStorage.getItem('appSettings');
-    return stored ? JSON.parse(stored) : { useGoogleSheets: false, googleSheetUrl: '' };
+    if (stored) {
+      const settings = JSON.parse(stored);
+      // Nếu có URL mặc định nhưng chưa lưu trong settings, tự động cập nhật
+      if (DEFAULT_WEB_APP_URL && (!settings.googleSheetUrl || settings.googleSheetUrl.trim() === '')) {
+        settings.googleSheetUrl = DEFAULT_WEB_APP_URL;
+        settings.useGoogleSheets = true;
+        localStorage.setItem('appSettings', JSON.stringify(settings));
+      }
+      return settings;
+    }
+    
+    // Mặc định ban đầu
+    const defaultSettings: AppSettings = { 
+      useGoogleSheets: true, 
+      googleSheetUrl: DEFAULT_WEB_APP_URL 
+    };
+    localStorage.setItem('appSettings', JSON.stringify(defaultSettings));
+    return defaultSettings;
   },
 
   saveSettings: async (settings: AppSettings): Promise<void> => {
