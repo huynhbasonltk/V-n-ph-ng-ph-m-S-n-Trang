@@ -27,9 +27,23 @@ export const Settings: React.FC = () => {
   // Guide State
   const [showGuide, setShowGuide] = useState(false);
 
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
+
   useEffect(() => {
     loadSettings();
   }, []);
+
+  // Auto-test connection when URL changes
+  useEffect(() => {
+    if (isFirstLoad) return;
+    
+    if (settings.useGoogleSheets && settings.googleSheetUrl) {
+      const timer = setTimeout(() => {
+        handleTestConnection(settings.googleSheetUrl);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [settings.googleSheetUrl, settings.useGoogleSheets]);
 
   const loadSettings = async () => {
     const s = await DataService.getSettings();
@@ -39,36 +53,23 @@ export const Settings: React.FC = () => {
        s.useGoogleSheets = true; // Tự động bật chế độ Cloud nếu có URL mặc định
     }
     setSettings(s);
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+    setIsFirstLoad(false);
     
-    if (settings.useGoogleSheets && settings.googleSheetUrl) {
-      if (settings.googleSheetUrl.includes('/edit')) {
-        setConnectionStatus({
-          type: 'warning',
-          msg: 'CẢNH BÁO: URL bạn nhập có chứa "/edit". Đây là link chỉnh sửa code, không phải link Web App. Vui lòng xem hướng dẫn lấy link "/exec".'
-        });
-        setIsLoading(false);
-        return;
-      }
+    // Test connection immediately on load if URL exists
+    if (s.useGoogleSheets && s.googleSheetUrl) {
+        handleTestConnection(s.googleSheetUrl);
     }
-
-    await DataService.saveSettings(settings);
-    setMessage('Đã lưu cài đặt thành công!');
-    setTimeout(() => setMessage(''), 3000);
-    setIsLoading(false);
   };
 
-  const handleTestConnection = async () => {
-    if (!settings.googleSheetUrl) {
-      setConnectionStatus({ type: 'error', msg: "Vui lòng nhập URL Google Script" });
-      return;
-    }
+  const updateSettings = async (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    await DataService.saveSettings(newSettings);
+  };
 
-    if (settings.googleSheetUrl.includes('/edit')) {
+  const handleTestConnection = async (urlToCheck: string) => {
+    if (!urlToCheck) return;
+
+    if (urlToCheck.includes('/edit')) {
        setConnectionStatus({ 
          type: 'error', 
          msg: "URL SAI: Bạn đang dùng link chỉnh sửa script (/edit). Hãy làm lại bước Deploy và copy URL kết thúc bằng '/exec'." 
@@ -77,10 +78,11 @@ export const Settings: React.FC = () => {
     }
 
     setIsLoading(true);
-    setConnectionStatus(null);
+    setConnectionStatus({ type: 'warning', msg: "Đang kiểm tra kết nối..." });
+    
     try {
       const t = new Date().getTime();
-      const response = await fetch(`${settings.googleSheetUrl}?action=getAll&sheet=Products&t=${t}`, {
+      const response = await fetch(`${urlToCheck}?action=getAll&sheet=Products&t=${t}`, {
           method: 'GET',
           redirect: 'follow'
       });
@@ -95,26 +97,27 @@ export const Settings: React.FC = () => {
         if (Array.isArray(json)) {
           setConnectionStatus({ 
               type: 'success', 
-              msg: `KẾT NỐI THÀNH CÔNG! Đã tìm thấy ${json.length} sản phẩm từ Sheet.` 
+              msg: `KẾT NỐI THÀNH CÔNG! Đã tìm thấy ${json.length} sản phẩm.` 
           });
-          await DataService.saveSettings(settings);
+          // Auto-save on success
+          await DataService.saveSettings({...settings, googleSheetUrl: urlToCheck});
         } else if (json.error) {
            setConnectionStatus({ type: 'error', msg: `Script báo lỗi: ${json.error}` });
         } else {
-           setConnectionStatus({ type: 'error', msg: "Dữ liệu trả về không đúng định dạng (không phải mảng)." });
+           setConnectionStatus({ type: 'error', msg: "Dữ liệu trả về không đúng định dạng." });
         }
       } catch (e) {
          if (text.trim().startsWith('<')) {
             setConnectionStatus({ 
               type: 'error', 
-              msg: "LỖI QUYỀN TRUY CẬP: URL trả về trang HTML đăng nhập. Hãy đảm bảo bạn đã chọn 'Who has access: Anyone' (Ai cũng được) khi Deploy." 
+              msg: "LỖI QUYỀN TRUY CẬP: Hãy chọn 'Who has access: Anyone' khi Deploy." 
             });
          } else {
-            setConnectionStatus({ type: 'error', msg: "Không thể đọc dữ liệu JSON. URL có thể bị sai." });
+            setConnectionStatus({ type: 'error', msg: "Không thể đọc dữ liệu JSON." });
          }
       }
     } catch (error: any) {
-      setConnectionStatus({ type: 'error', msg: "Lỗi mạng/CORS: " + error.message + ". Kiểm tra lại URL." });
+      setConnectionStatus({ type: 'error', msg: "Lỗi mạng/CORS: " + error.message });
     }
     setIsLoading(false);
   };
@@ -299,14 +302,14 @@ function createJSONOutput(obj) {
             <h2 className="text-lg font-bold text-slate-800">1. Cấu hình nguồn dữ liệu</h2>
           </div>
 
-          <form onSubmit={handleSave} className="p-6 space-y-6">
+          <form onSubmit={(e) => e.preventDefault()} className="p-6 space-y-6">
             <div className="space-y-4">
               <label className={`flex items-center space-x-3 p-4 border rounded-xl cursor-pointer transition-all ${!settings.useGoogleSheets ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'}`}>
                 <input 
                   type="radio" 
                   name="dataSource"
                   checked={!settings.useGoogleSheets}
-                  onChange={() => setSettings({...settings, useGoogleSheets: false})}
+                  onChange={() => updateSettings({...settings, useGoogleSheets: false})}
                   className="w-5 h-5 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex-1">
@@ -321,7 +324,7 @@ function createJSONOutput(obj) {
                   type="radio" 
                   name="dataSource"
                   checked={settings.useGoogleSheets}
-                  onChange={() => setSettings({...settings, useGoogleSheets: true})}
+                  onChange={() => updateSettings({...settings, useGoogleSheets: true})}
                   className="w-5 h-5 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex-1">
@@ -356,34 +359,24 @@ function createJSONOutput(obj) {
                   )}
                 </div>
                 
-                <div className="flex justify-between items-center mt-2">
-                   <button 
-                     type="button"
-                     onClick={handleTestConnection}
-                     className="text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center transition-colors"
-                     disabled={isLoading}
-                   >
-                     <RefreshCw size={14} className={`mr-2 ${isLoading ? 'animate-spin' : ''}`} /> 
-                     Thử kết nối
-                   </button>
-                   {connectionStatus && (
-                      <span className={`text-[10px] font-bold ${connectionStatus.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                         {connectionStatus.msg.split('.')[0]}
-                      </span>
-                   )}
+                <div className="flex justify-between items-center mt-2 min-h-[24px]">
+                   <div className="flex items-center">
+                      {isLoading && <RefreshCw size={14} className="mr-2 animate-spin text-blue-600" />}
+                      {connectionStatus ? (
+                        <span className={`text-[10px] font-bold ${connectionStatus.type === 'success' ? 'text-green-600' : connectionStatus.type === 'warning' ? 'text-orange-500' : 'text-red-600'}`}>
+                           {connectionStatus.msg}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">Đang chờ nhập URL...</span>
+                      )}
+                   </div>
                 </div>
               </div>
             )}
 
             <div className="pt-4 border-t flex justify-between items-center">
                <span className="text-green-600 text-xs font-bold">{message}</span>
-               <button 
-                type="submit"
-                disabled={isLoading}
-                className="px-6 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-black transition-all shadow-lg font-bold disabled:opacity-50 text-sm"
-              >
-                LƯU CÀI ĐẶT
-              </button>
+               {/* Auto-save enabled, button removed */}
             </div>
           </form>
         </div>
